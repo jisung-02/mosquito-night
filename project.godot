@@ -1,6 +1,6 @@
 config_version=5
 [application]
-config/name="불 끄면 모기"
+config/name="잠들 수 없는 밤"
 config/use_custom_user_dir=true
 config/custom_user_dir_name="godot/app_userdata/잠 못 드는 밤 · Mosquito Night"
 config/custom_user_dir_name.macos="Godot/app_userdata/잠 못 드는 밤 · Mosquito Night"
