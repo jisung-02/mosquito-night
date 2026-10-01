@@ -534,7 +534,7 @@ func _draw() -> void:
 
 func _draw_intro() -> void:
 	draw_rect(Rect2(Vector2.ZERO, SIZE), Color(0.02, 0.035, 0.065, 0.65))
-	_center("잠 못 드는 밤", 221, 42)
+	_center("불 끄면 모기", 221, 42)
 	var instruction: String = "마우스로 겨냥하고 클릭해 손뼉을 치세요."
 	if _progress.equipped_tool == "swatter":
 		instruction = "마우스로 겨냥하고 클릭해 신문지를 휘두르세요."
