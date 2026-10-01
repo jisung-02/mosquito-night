@@ -1,13 +1,10 @@
 class_name NightMotion
 extends RefCounted
 ## Local mesh rigs leave rigid supports fixed; independent appendages can bend.
-const COLUMNS: int = 20
-const ROWS: int = 28
 const FLYTRAP_MOUTHS: Array[Vector2] = [Vector2(0.22, 0.30), Vector2(0.55, 0.145), Vector2(0.80, 0.36), Vector2(0.64, 0.53)]
 const SUNDEW_MOUTHS: Array[Vector2] = [Vector2(0.24, 0.20), Vector2(0.44, 0.13), Vector2(0.69, 0.20), Vector2(0.80, 0.32)]
 var _meshes: Dictionary[String, ArrayMesh] = {}
-var _uvs: PackedVector2Array = PackedVector2Array()
-var _indices: PackedInt32Array = PackedInt32Array()
+var _grids: Dictionary[String, Dictionary] = {}
 
 static func closing(age: float, id: String) -> float:
 	if age < 0:
@@ -82,25 +79,33 @@ static func larva_path(index: int, time: float, width: float, height: float) -> 
 	return points
 
 func mesh(key: String, id: String, rect: Rect2, time: float, age: float = -1.0, leaf: int = 0, actions: Array[Dictionary] = []) -> ArrayMesh:
-	if _uvs.is_empty():
-		_build_grid()
+	if not _grids.has(id):
+		_grids[id] = _build_grid(id)
+	var grid: Dictionary = _grids[id]
+	var uvs: PackedVector2Array = grid.uvs
 	var vertices: PackedVector3Array = PackedVector3Array()
-	for uv: Vector2 in _uvs:
+	vertices.resize(uvs.size())
+	for index: int in range(uvs.size()):
+		var uv: Vector2 = uvs[index]
 		var deformed: Vector2 = deform(id, uv, time, age, leaf)
 		for action: Dictionary in actions:
 			deformed += deform(id, uv, 0, float(action.age), int(action.leaf)) - deform(id, uv, 0, -1, 0)
 		var point: Vector2 = rect.position + deformed * rect.size
-		vertices.append(Vector3(point.x, point.y, 0))
-	var arrays: Array = []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = vertices
-	arrays[Mesh.ARRAY_TEX_UV] = _uvs
-	arrays[Mesh.ARRAY_INDEX] = _indices
+		vertices[index] = Vector3(point.x, point.y, 0)
 	if not _meshes.has(key):
-		_meshes[key] = ArrayMesh.new()
+		var arrays: Array = []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = vertices
+		arrays[Mesh.ARRAY_TEX_UV] = uvs
+		arrays[Mesh.ARRAY_INDEX] = grid.indices
+		var created: ArrayMesh = ArrayMesh.new()
+		created.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, Mesh.ARRAY_FLAG_USE_DYNAMIC_UPDATE)
+		_meshes[key] = created
+	else:
+		# UVs and triangles stay on the GPU; upload only changed positions.
+		_meshes[key].surface_update_vertex_region(0, 0, vertices.to_byte_array())
 	var result: ArrayMesh = _meshes[key]
-	result.clear_surfaces()
-	result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	result.custom_aabb = AABB(Vector3(rect.position.x - rect.size.x * 0.1, rect.position.y - rect.size.y * 0.1, -0.1), Vector3(rect.size.x * 1.2, rect.size.y * 1.2, 0.2))
 	return result
 
 func release(key: String) -> void:
@@ -109,11 +114,23 @@ func release(key: String) -> void:
 func reset() -> void:
 	_meshes.clear()
 
-func _build_grid() -> void:
-	for row: int in range(ROWS + 1):
-		for column: int in range(COLUMNS + 1):
-			_uvs.append(Vector2(column / float(COLUMNS), row / float(ROWS)))
-	for row: int in range(ROWS):
-		for column: int in range(COLUMNS):
-			var a: int = row * (COLUMNS + 1) + column
-			_indices.append_array(PackedInt32Array([a, a + 1, a + COLUMNS + 1, a + 1, a + COLUMNS + 2, a + COLUMNS + 1]))
+func _build_grid(id: String) -> Dictionary:
+	# Small insects need fewer vertices than hands and folding plant leaves.
+	var columns: int = 8 if id in ["mosquito", "dragonfly_body"] else 12
+	var rows: int = 12 if columns == 8 else 18
+	if id in ["flytrap", "sundew"]:
+		columns = 14
+		rows = 22
+	elif id == "newspaper":
+		columns = 4
+		rows = 18
+	var uvs: PackedVector2Array = PackedVector2Array()
+	var indices: PackedInt32Array = PackedInt32Array()
+	for row: int in range(rows + 1):
+		for column: int in range(columns + 1):
+			uvs.append(Vector2(column / float(columns), row / float(rows)))
+	for row: int in range(rows):
+		for column: int in range(columns):
+			var a: int = row * (columns + 1) + column
+			indices.append_array(PackedInt32Array([a, a + 1, a + columns + 1, a + 1, a + columns + 2, a + columns + 1]))
+	return {"uvs": uvs, "indices": indices}

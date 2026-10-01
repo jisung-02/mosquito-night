@@ -1,5 +1,7 @@
 extends Node2D
 ## Full-screen mosquito hunting; the room is the entire playfield.
+const Content = preload("res://night_content.gd")
+const Aerosol = preload("res://aerosol_geometry.gd")
 const SAVE_PATH: String = "user://best.json"
 const Progression = preload("res://progression.gd")
 const Flight = preload("res://mosquito_flight.gd")
@@ -13,6 +15,24 @@ const Swing = preload("res://weapon_swing.gd")
 const PROP_POS: Dictionary = Props.POSITIONS
 const SIZE: Vector2 = Vector2(1280, 720)
 const START_BUTTON: Rect2 = Rect2(540, 470, 200, 52)
+const FIRST_NIGHT: Rect2 = Rect2(540, 536, 200, 35)
+const WINDOW_BUTTON: Rect2 = Rect2(948, 74, 170, 30)
+const SHOP_PAGES: Array[String] = ["도구", "설치", "소모품", "도감"]
+var _shop_page: int = 0
+var _placing: bool = false
+var _drag_prop: String = ""
+var _drag_original: Vector2 = Vector2.ZERO
+var _drag_offset: Vector2 = Vector2.ZERO
+var _dirty: bool = true
+var _window_time: float = 0.0
+var _window_blend: float = 0.0
+var _repellent_charges: int = 0
+var _spray_time: float = 0.0
+var _wave_index: int = 0
+var _wave_queue: int = 0
+var _wave_timer: float = 0.0
+var _night_stats: Dictionary[String, int] = {}
+var _goal_bonus: int = 0
 var _progress: NightProgression
 var _assets: Dictionary[String, Texture2D] = {}
 var _prop_visible: Dictionary[String, Rect2i] = {}
@@ -28,6 +48,7 @@ var _dragon_rotation: float = 0.0
 var _save_timer: float = 0.0
 var _prop_pulse: Dictionary[String, float] = {}
 var _wing_samples: Array[Dictionary] = []
+var _wing_mesh: ArrayMesh
 var _mosquito_texture: Texture2D
 var _newspaper_texture: Texture2D
 var _background: Texture2D
@@ -111,35 +132,46 @@ func _ready() -> void:
 	_best = _progress.best
 	_assets["swatter"] = _newspaper_texture
 	_assets["newspaper"] = _newspaper_texture
-	for key: String in ["hand", "clap_hand", "electric", "trap", "flytrap", "sundew", "dragonfly", "dragonfly_body", "mosquito_cautious"]:
+	for key: String in ["clap_hand", "electric", "trap", "flytrap", "sundew", "dragonfly", "dragonfly_body", "mosquito_cautious", "repellent", "aerosol"]:
 		_assets[key] = load("res://assets/" + key + ".png") as Texture2D
+	_assets["hand"] = _assets["clap_hand"]
 	for key: String in ["trap", "flytrap", "sundew"]:
 		_prop_visible[key] = _assets[key].get_image().get_used_rect()
 	var fan_thumbnail: AtlasTexture = AtlasTexture.new()
 	fan_thumbnail.atlas = _background
 	fan_thumbnail.region = Rect2(_background.get_size() * Vector2(0.865, 0.276), _background.get_size() * Vector2(0.075, 0.17))
 	_assets["fan"] = fan_thumbnail
+	var screen_thumbnail: AtlasTexture = AtlasTexture.new()
+	screen_thumbnail.atlas = _background
+	screen_thumbnail.region = Rect2(_background.get_size() * Vector2(0.445, 0.10), _background.get_size() * Vector2(0.22, 0.37))
+	_assets["screen"] = screen_thumbnail
 	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 	_last_mouse = get_global_mouse_position()
 	_restart()
 
 func _process(delta: float) -> void:
-	if not (_intro or _over or _paused or _shop):
+	if not (_intro or _over or _paused or _shop or _placing):
 		var mouse: Vector2 = get_global_mouse_position()
 		_cursor_velocity = (mouse - _last_mouse) / maxf(delta, 0.001)
 		_last_mouse = mouse
 	var left: float = maxf(0, delta)
-	while left > 0.000001 and not (_intro or _over or _paused or _shop):
+	while left > 0.000001 and not (_intro or _over or _paused or _shop or _placing):
 		var step: float = minf(left, 1.0 / 120.0)
 		_step_game(step)
 		left -= step
-	_sound.update_room(delta, _bugs, not (_intro or _paused or _over or _shop), _progress.levels, _dragon_pos)
-	if _room_material:
+	_sound.update_room(delta, _bugs, not (_intro or _paused or _over or _shop or _placing), _progress.levels, _dragon_pos, _progress.position_for("trap"))
+	if _room_material and (not (_intro or _over or _paused or _shop or _placing) or _dirty):
 		_room_material.set_shader_parameter("room_time", _elapsed)
 		_room_material.set_shader_parameter("fan_power", 1.0 + _progress.levels["fan"] * 0.35 if _progress.levels["fan"] > 0 else 0.0)
-	queue_redraw()
+		_room_material.set_shader_parameter("screen_level", _progress.levels["screen"])
+		_room_material.set_shader_parameter("window_closed", _window_blend)
+	if _dirty or not (_intro or _over or _paused or _shop or _placing):
+		queue_redraw()
+		_dirty = false
 
 func _step_game(delta: float) -> void:
+	_window_time = maxf(0, _window_time - delta)
+	_window_blend = move_toward(_window_blend, 1.0 if _window_time > 0 else 0.0, delta * 3)
 	_cooldown = maxf(0, _cooldown - delta)
 	_swat = maxf(0, _swat - delta)
 	if _clap_pending:
@@ -160,9 +192,10 @@ func _step_game(delta: float) -> void:
 		_combo = 0
 	_spawn_timer -= delta
 	if _spawn_timer <= 0:
-		if _bugs.size() < Difficulty.active_limit(_progress.night):
+		if _window_time <= 0 and _bugs.size() < Difficulty.active_limit(_progress.night):
 			_spawn_bug()
-		_spawn_timer = Difficulty.spawn_interval(_progress.night, _elapsed)
+		_spawn_timer = Content.spawn_interval(Difficulty.spawn_interval(_progress.night, _elapsed), _progress.night, _progress.levels["screen"])
+	_update_waves(delta)
 	var expired: Array[int] = []
 	for i: int in range(_bugs.size()):
 		var bug: Dictionary = _bugs[i]
@@ -172,21 +205,27 @@ func _step_game(delta: float) -> void:
 		bug.speed_scale = move_toward(float(bug.speed_scale), target_speed, delta * 0.65)
 		var attractor: Vector2 = _flight_attractor(bug.pos)
 		var threat: Vector2 = _swat_pos if _swat > 0.04 else Vector2.INF
-		if int(bug.kind) == 3 and not threat.is_finite() and _cursor_velocity.length() > 20:
+		if int(bug.kind) in [3, 6] and not threat.is_finite() and _cursor_velocity.length() > 20:
 			threat = get_global_mouse_position()
+		if int(bug.kind) == 5 and _elapsed < float(bug.get("swarm_until", 0)) and not attractor.is_finite():
+			attractor = bug.get("swarm_anchor", Vector2(735, 215))
 		Flight.advance(bug, delta, attractor, threat)
 		if float(bug.life) <= 0:
 			expired.append(i)
 	for i: int in range(expired.size() - 1, -1, -1):
 		_motion.release("bug_%d" % int(_bugs[expired[i]].id))
 		_bugs.remove_at(expired[i])
-		_health -= 1
+		if _repellent_charges > 0:
+			_repellent_charges -= 1
+		else:
+			_health -= 1
 		_flash = 0.35
 		_combo = 0
 	if _clap_pending and _clap_delay <= 0:
 		_clap_pending = false
 		_resolve_strike(_swat_pos, "hand", _swat_roll)
 	_update_swing()
+	_update_spray(delta)
 	_update_auto(delta)
 	_save_timer += delta
 	if _save_timer > 2.0:
@@ -198,6 +237,7 @@ func _step_game(delta: float) -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and not _intro and not _over and not "--verify-game" in OS.get_cmdline_user_args():
 		_paused = true
+		_dirty = true
 		if is_instance_valid(_sound):
 			_sound.silence()
 
@@ -209,6 +249,10 @@ func _exit_tree() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 func _unhandled_input(event: InputEvent) -> void:
+	_dirty = true
+	if _placing:
+		_placement_input(event)
+		return
 	if _intro:
 		if event is InputEventKey and event.pressed and not event.echo:
 			match event.physical_keycode:
@@ -221,7 +265,9 @@ func _unhandled_input(event: InputEvent) -> void:
 					_sound.set_muted(_muted)
 		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			var pos: Vector2 = get_canvas_transform().affine_inverse() * event.position
-			if START_BUTTON.has_point(pos):
+			if _progress.night > 1 and FIRST_NIGHT.has_point(pos):
+				_first_night()
+			elif START_BUTTON.has_point(pos):
 				_start_game()
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -249,6 +295,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				_equip_tool("swatter")
 			KEY_3:
 				_equip_tool("electric")
+			KEY_4:
+				_equip_tool("aerosol")
+			KEY_Q:
+				_use_window()
 			KEY_H:
 				_debug_hitboxes = not _debug_hitboxes
 			KEY_R:
@@ -263,6 +313,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_shop_click(pos)
 		elif Rect2(948, 22, 170, 44).has_point(pos):
 			_toggle_shop()
+		elif WINDOW_BUTTON.has_point(pos) and _progress.levels["window"] > 0:
+			_use_window()
 		elif _over:
 			_restart()
 		elif not _paused:
@@ -275,6 +327,7 @@ func _start_game() -> void:
 	if OS.has_feature("web"):
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 	_intro = false
+	_dirty = true
 	_paused = false
 	_last_mouse = get_global_mouse_position()
 	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
@@ -287,21 +340,35 @@ func _toggle_fullscreen() -> void:
 func _toggle_shop() -> void:
 	if _intro:
 		return
+	_dirty = true
 	_shop = not _shop
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if _shop else Input.MOUSE_MODE_HIDDEN
 	if _shop:
 		_sound.silence()
 
 func _equip_tool(id: String) -> void:
-	if _swat > 0 or _clap_pending:
+	if _swat > 0 or _clap_pending or _spray_time > 0:
 		return
 	if _progress.equip(id):
+		_dirty = true
 		_cooldown = maxf(_cooldown, _progress.cooldown())
 		_swat = 0.0
 		_zap = 0.0
 		_sound.play_event("purchase", get_global_mouse_position(), -14)
 
 func _restart() -> void:
+	_dirty = true
+	_placing = false
+	_drag_prop = ""
+	_window_time = 0.0
+	_window_blend = 0.0
+	_spray_time = 0.0
+	_wave_index = 0
+	_wave_queue = 0
+	_wave_timer = 0.0
+	_night_stats = {"kills": 0, "manual": 0, "combo": 0, "cautious": 0, "stubborn": 0}
+	_goal_bonus = 0
+	_repellent_charges = _progress.levels["repellent"]
 	if _over and _health > 0 and _remaining <= 0:
 		_progress.night += 1
 		_progress.save()
@@ -347,12 +414,12 @@ func _restart() -> void:
 		# Stagger the opening bites so several insects cannot expire together.
 		_bugs[-1].life += i * 1.4
 
-func _spawn_bug() -> void:
+func _spawn_bug(forced_kind: int = -1, opening: Vector2 = Vector2.INF) -> void:
 	var kind: int = 0
 	var choice: float = randf()
 	var golden: float = Difficulty.golden_chance(_progress.night)
-	var cautious: float = golden + Difficulty.cautious_chance(_progress.night)
-	var stubborn: float = cautious + Difficulty.stubborn_chance(_progress.night)
+	var cautious: float = golden + Content.cautious_chance(Difficulty.cautious_chance(_progress.night), _progress.night)
+	var stubborn: float = cautious + Content.stubborn_chance(Difficulty.stubborn_chance(_progress.night), _progress.night)
 	if choice < golden:
 		kind = 2
 	elif choice < cautious:
@@ -361,9 +428,18 @@ func _spawn_bug() -> void:
 		kind = 4
 	elif choice < stubborn + Difficulty.fast_chance(_progress.night, _elapsed):
 		kind = 1
+	elif _progress.night >= 3 and choice < stubborn + Difficulty.fast_chance(_progress.night, _elapsed) + 0.08:
+		kind = 6
+	elif choice > 1.0 - Content.small_chance(_progress.night):
+		kind = 5
+	if forced_kind >= 0:
+		kind = forced_kind
 	_next_bug_id += 1
-	var bug: Dictionary = Flight.create(_next_bug_id, kind, Vector2(randf_range(140, 1140), randf_range(165, 580)), randi())
-	bug.life = Difficulty.bite_delay(_progress.night, _elapsed, kind)
+	var bug: Dictionary = Flight.create(_next_bug_id, kind, opening if opening.is_finite() else Vector2(randf_range(140, 1140), randf_range(165, 580)), randi())
+	bug.life = Content.bite_delay(Difficulty.bite_delay(_progress.night, _elapsed, kind), _progress.night)
+	bug.swarm_until = _elapsed + 2.0
+	bug.swarm_anchor = Vector2(735, 220)
+	bug.spray_dose = 0.0
 	bug.speed_scale = Difficulty.speed_scale(_progress.night, _elapsed)
 	_bugs.append(bug)
 
@@ -379,6 +455,10 @@ func _strike(pos: Vector2) -> void:
 	_swing_hit = false
 	_swing_swoosh = false
 	_swing_checked = false
+	if _progress.equipped_tool == "aerosol":
+		_spray_time = Aerosol.DURATION
+		_sound.play_event("spray", Aerosol.nozzle(pos), -10)
+		return
 	if _progress.equipped_tool == "hand":
 		_swat = Clap.DURATION
 		_clap_pending = true
@@ -458,6 +538,15 @@ func _capture(index: int, source: String, origin: Vector2) -> void:
 	var points: int = reward * multiplier
 	_score += points
 	_kills += 1
+	_night_stats["kills"] += 1
+	if source == "hand":
+		_night_stats["manual"] += 1
+		_night_stats["combo"] = maxi(_night_stats["combo"], _combo)
+	if int(bug.kind) == 3:
+		_night_stats["cautious"] += 1
+	elif int(bug.kind) == 4:
+		_night_stats["stubborn"] += 1
+	_progress.record_capture(int(bug.kind))
 	_progress.earn(points)
 	_best = maxi(_best, _score)
 	_progress.best = _best
@@ -482,6 +571,11 @@ func _finish() -> void:
 	if _over:
 		return
 	_over = true
+	_dirty = true
+	var goal: Dictionary = Content.goal(_progress.night)
+	if _health > 0 and _remaining <= 0 and _night_stats.get(goal.stat, 0) >= int(goal.target):
+		if _progress.claim_goal(_progress.night, int(goal.reward)):
+			_goal_bonus = int(goal.reward)
 	_health = maxi(0, _health)
 	_best = maxi(_best, _score)
 	_progress.best = _best
@@ -515,19 +609,23 @@ func _draw() -> void:
 		_draw_hud()
 	if _intro:
 		_draw_intro()
+	elif _placing:
+		_draw_placement()
 	elif _shop:
 		_draw_shop()
 	elif _over:
 		draw_rect(Rect2(Vector2.ZERO, SIZE), Color(0.02, 0.04, 0.09, 0.62))
 		_center("생존" if _health > 0 else "밤 종료", 283, 40)
 		_center("%d점" % _score, 345, 28)
+		if _goal_bonus > 0:
+			_center("목표 달성 · +%d 코인" % _goal_bonus, 378, 17)
 		_center("클릭 · 다음 밤" if _health > 0 else "클릭 · 재도전", 410, 18)
 	elif _paused:
 		draw_rect(Rect2(Vector2.ZERO, SIZE), Color(0.02, 0.04, 0.09, 0.45))
 		_center("Ⅱ", 345, 40)
 		_center("P", 390, 18)
-	if not _intro and not _over and not _paused and not _shop:
-		var tool_position: Vector2 = _swat_pos if _swat > 0 else get_global_mouse_position()
+	if not _intro and not _over and not _paused and not _shop and not _placing:
+		var tool_position: Vector2 = _swat_pos if _swat > 0 or _spray_time > 0 else get_global_mouse_position()
 		_draw_tool(tool_position)
 		if _debug_hitboxes:
 			_draw_hitboxes(tool_position)
@@ -540,18 +638,32 @@ func _draw_intro() -> void:
 		instruction = "마우스로 겨냥하고 클릭해 신문지를 휘두르세요."
 	elif _progress.equipped_tool == "electric":
 		instruction = "마우스로 겨냥하고 클릭해 전기모기채를 휘두르세요."
+	elif _progress.equipped_tool == "aerosol":
+		instruction = "마우스로 겨냥하고 클릭해 살충제를 분무하세요."
+	_center(Content.name_for(_progress.night), 257, 16)
 	_center(instruction, 294, 22)
 	_center("모기를 잡아 모은 코인으로 도구·자동 사냥 동료를 구매하세요.", 337, 21)
 	_center("60초 생존하면 다음 밤 · 밤마다 더 많은 모기 · 다섯 번 물리면 종료", 379, 17)
-	_center("1 · 2 · 3  도구     B  상점     P  일시정지     M  소리", 429, 15)
+	_center("1 · 2 · 3 · 4  도구     Q  창문     B  상점     P  일시정지     M  소리", 429, 15)
 	var hover: bool = START_BUTTON.has_point(get_global_mouse_position())
 	_box(START_BUTTON, Color("4b7562") if hover else Color("34594e"), 12)
-	_center("시작  SPACE", 504, 22)
+	_center("이어서 · %d번째 밤" % _progress.night if _progress.night > 1 else "시작  SPACE", 504, 22)
+	if _progress.night > 1:
+		_box(FIRST_NIGHT, Color("243e42"), 8)
+		_center("첫 밤부터", 560, 17)
+		_center("밤은 처음부터 · 코인·도구 유지", 592, 13)
 
 func _draw_hud() -> void:
 	_label(Vector2(34, 48), "%03d" % _score, 30, Color("f6eddc"))
 	draw_circle(Vector2(40, 75), 5, Color("edc580"))
 	_label(Vector2(53, 81), str(_progress.wallet), 16, Color("edc580"))
+	var goal: Dictionary = Content.goal(_progress.night)
+	_label(Vector2(34, 133), "%s  %d/%d" % [goal.text, mini(int(goal.target), _night_stats.get(goal.stat, 0)), goal.target], 12, Color("b1bab2"))
+	if _progress.levels["window"] > 0 or _window_time > 0:
+		_box(WINDOW_BUTTON, Color(0.06, 0.1, 0.14, 0.65), 8)
+		_label(Vector2(962, 95), "닫힘 %d초" % int(ceil(_window_time)) if _window_time > 0 else "창문 Q · %d" % _progress.levels["window"], 13, Color("c3d1ce"))
+	for shield: int in range(_repellent_charges):
+		draw_arc(Vector2(1148 + shield * 16, 124), 5, 0, TAU, 12, Color("a0d2c0"), 1.3, true)
 	_label(Vector2(34, 111), "%d번째 밤" % _progress.night, 14, Color("c5c8c4"))
 	_box(Rect2(948, 22, 170, 44), Color(0.06, 0.1, 0.14, 0.65), 10)
 	_label(Vector2(1001, 50), "상점 B", 17, Color("efd6a0"))
@@ -564,6 +676,9 @@ func _draw_hud() -> void:
 
 func _build_wing_samples() -> void:
 	# Exposure samples cover many rapid strokes; avoid sampling 800 Hz at 60 fps.
+	var vertices: PackedVector3Array = PackedVector3Array()
+	var colours: PackedColorArray = PackedColorArray()
+	var indices: PackedInt32Array = PackedInt32Array()
 	for side: int in [-1, 1]:
 		for sample: int in range(7):
 			var angle: float = (sample - 3) * 0.13 * side
@@ -577,6 +692,19 @@ func _build_wing_samples() -> void:
 				var t: float = i / 16.0
 				contour.append(root.lerp(tip, t) + Vector2(0, sin(t * PI) * 3.4).rotated(angle))
 			_wing_samples.append({"shape": contour, "root": root, "tip": tip, "weight": 0.021 + (3 - absi(sample - 3)) * 0.012, "vein": sample == 2 or sample == 4})
+			var offset: int = vertices.size()
+			for point: Vector2 in contour:
+				vertices.append(Vector3(point.x, point.y, 0))
+				colours.append(Color(0.74, 0.81, 0.85, float(_wing_samples[-1].weight)))
+			for index: int in Geometry2D.triangulate_polygon(contour):
+				indices.append(offset + index)
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_COLOR] = colours
+	arrays[Mesh.ARRAY_INDEX] = indices
+	_wing_mesh = ArrayMesh.new()
+	_wing_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 
 func _draw_bug(bug: Dictionary) -> void:
 	var pos: Vector2 = bug.pos
@@ -586,12 +714,10 @@ func _draw_bug(bug: Dictionary) -> void:
 		draw_arc(pos, maxf(17, float(bug.body_size) * 0.32), -PI / 2, -PI / 2 + TAU * (1 - float(bug.life) / 3), 36, Color(0.85, 0.43, 0.36, 0.65), 1.2, true)
 	draw_set_transform(pos, float(bug.rotation), Vector2.ONE * scale_factor)
 	# Wings attach to the thorax and share the body pivot and depth scale.
+	var spread: float = 0.98 + sin(float(bug.phase) * 8) * 0.025
+	var opacity: float = float(bug.wing_energy) * (0.92 + sin(float(bug.phase) * 11 + float(bug.seed)) * 0.08)
+	draw_mesh(_wing_mesh, null, Transform2D(0, Vector2(spread, 1), 0, Vector2.ZERO), Color(1, 1, 1, opacity))
 	for wing: Dictionary in _wing_samples:
-		var opacity: float = float(wing.weight) * float(bug.wing_energy) * (0.92 + sin(float(bug.phase) * 11 + float(bug.seed)) * 0.08)
-		var points: PackedVector2Array = PackedVector2Array()
-		for point: Vector2 in wing.shape:
-			points.append(Vector2(point.x * (0.98 + sin(float(bug.phase) * 8) * 0.025), point.y))
-		draw_colored_polygon(points, Color(0.74, 0.81, 0.85, opacity))
 		if wing.vein:
 			draw_line(wing.root, wing.tip, Color(0.77, 0.8, 0.81, 0.08), 0.65, true)
 	var tint: Color = Color(0.92, 0.94, 1.0) if kind != 2 else Color(1.0, 0.93, 0.74)
@@ -609,6 +735,9 @@ func _bug_texture(kind: int) -> Texture2D:
 	return _assets["mosquito_cautious"] if kind == 3 else _mosquito_texture
 
 func _draw_tool(pos: Vector2) -> void:
+	if _progress.equipped_tool == "aerosol":
+		_draw_aerosol(pos)
+		return
 	if _progress.equipped_tool == "hand":
 		_draw_clap(pos)
 		return
@@ -667,6 +796,11 @@ func _weapon_pose(pos: Vector2, layout: Dictionary, roll: float) -> Transform2D:
 	return HitGeometry.tool_pose(pos, _progress.equipped_tool, 0, roll)
 
 func _draw_hitboxes(pos: Vector2) -> void:
+	if _progress.equipped_tool == "aerosol":
+		var cone: PackedVector2Array = Aerosol.outline(pos, _progress.levels["aerosol"], Aerosol.DURATION - _spray_time if _spray_time > 0 else 0.12)
+		cone.append(cone[0])
+		draw_polyline(cone, Color(0.3, 1, 0.8, 0.8), 1.0, true)
+		return
 	var layout: Dictionary = _swing_layout if not _swing_tool.is_empty() else _tool_layout()
 	var pose: Transform2D = _weapon_pose(pos, layout, _swat_roll if _swat > 0 else _tool_roll)
 	var tool_outline: PackedVector2Array = HitGeometry.ellipse_outline(Vector2.ZERO, layout.radii, pose)
@@ -788,7 +922,7 @@ func _helper_origin(id: String, leaf: int = 0) -> Vector2:
 		uv = Motion.SUNDEW_MOUTHS[leaf]
 	if id in ["flytrap", "sundew"]:
 		uv = Motion.deform(id, uv, _elapsed, -1)
-	return PROP_POS[id] + rect.position + uv * rect.size
+	return _progress.position_for(id) + rect.position + uv * rect.size
 
 func _closest_leaf(id: String, pos: Vector2) -> int:
 	var chosen: int = 0
@@ -822,7 +956,7 @@ func _draw_helpers() -> void:
 	for id: String in ["trap", "flytrap", "sundew"]:
 		if _progress.levels[id] <= 0:
 			continue
-		var pos: Vector2 = PROP_POS[id]
+		var pos: Vector2 = _progress.position_for(id)
 		var pulse: float = _prop_pulse.get(id, 0.0)
 		var rect: Rect2 = _prop_rect(id)
 		var texture: Texture2D = _assets[id]
@@ -852,7 +986,7 @@ func _draw_helpers() -> void:
 			var uv: Vector2 = Motion.FLYTRAP_MOUTHS[leaf] if id == "flytrap" else Motion.SUNDEW_MOUTHS[leaf]
 			var age: float = _elapsed - float(_motion_actions["%s_%d" % [id, leaf]].start)
 			var rect: Rect2 = _prop_rect(id)
-			destination = PROP_POS[id] + rect.position + Motion.deform(id, uv, _elapsed, age, leaf) * rect.size
+			destination = _progress.position_for(id) + rect.position + Motion.deform(id, uv, _elapsed, age, leaf) * rect.size
 		var pos: Vector2 = effect.from.lerp(destination, ease)
 		if effect.kind == "trap":
 			pos += Vector2(sin(t * TAU * 1.5), cos(t * TAU * 1.5)) * (1 - t) * t * 20
@@ -903,34 +1037,60 @@ func _draw_dragonfly() -> void:
 func _shop_rect(index: int) -> Rect2:
 	return Rect2(110 + (index % 4) * 268, 180 + int(index / 4.0) * 212, 252, 198)
 
+func _shop_items() -> Array[Dictionary]:
+	var items: Array[Dictionary] = []
+	var groups: Array = [["swatter", "electric", "reach", "aerosol"], ["trap", "flytrap", "sundew", "dragonfly", "fan", "screen"], ["repellent", "window"]]
+	if _shop_page >= 3:
+		return items
+	for item: Dictionary in Progression.CATALOG:
+		if item.id in groups[_shop_page]:
+			items.append(item)
+	return items
+
 func _shop_click(pos: Vector2) -> void:
+	_dirty = true
 	if Rect2(1107, 105, 50, 44).has_point(pos):
 		_toggle_shop()
 		return
-	for i: int in range(Progression.CATALOG.size()):
+	for tab_index: int in range(4):
+		if Rect2(110 + tab_index * 130, 145, 122, 27).has_point(pos):
+			_shop_page = tab_index
+			_shop_message = ""
+			return
+	if _shop_page == 0 and Rect2(434, 102, 170, 35).has_point(pos):
+		_equip_tool("hand")
+		return
+	if _shop_page == 1 and Rect2(918, 603, 224, 34).has_point(pos):
+		_begin_placement()
+		return
+	var items: Array[Dictionary] = _shop_items()
+	for i: int in range(items.size()):
+		var item: Dictionary = items[i]
 		var rect: Rect2 = _shop_rect(i)
+		if item.id in ["swatter", "electric", "aerosol"] and _progress.owns_tool(item.id) and Rect2(rect.position + Vector2(78, 48), Vector2(160, 25)).has_point(pos):
+			_equip_tool(item.id)
+			_shop_message = _progress.tool_name() + " 장착" if _progress.equipped_tool == item.id else "휘두르기가 끝나면 장착할 수 있습니다."
+			return
 		if not Rect2(rect.position + Vector2(14, 155), Vector2(224, 31)).has_point(pos):
 			continue
-		var item: Dictionary = Progression.CATALOG[i]
 		var locked: String = _progress.requirement(item.id)
 		if not locked.is_empty():
-			_shop_message = locked + " 후 열립니다."
-		elif _progress.levels[item.id] >= int(item.max):
-			_shop_message = item.name + " · 최고 단계입니다."
+			_shop_message = locked
+		elif not _progress.purchase(item.id):
+			_shop_message = "최고 단계" if _progress.levels[item.id] >= int(item.max) else "코인 부족"
 		else:
-			var previous_tool: String = _progress.equipped_tool
-			if not _progress.purchase(item.id):
-				_shop_message = "%d코인 부족" % (_progress.cost(item.id) - _progress.wallet)
-				return
-			if _progress.equipped_tool != previous_tool:
-				_clap_pending = false
-				_swat = 0
-				_swing_tool = ""
-				_swing_layout.clear()
-			_shop_message = item.name + " Lv.%d" % _progress.levels[item.id]
+			_spray_time = 0
+			_clap_pending = false
+			_swat = 0
+			_swing_tool = ""
+			_swing_layout.clear()
+			_shop_message = item.name + " 구매"
 			if _auto_timers.has(item.id):
 				_auto_timers[item.id] = minf(1, _progress.interval(item.id))
+			if item.id == "repellent":
+				_repellent_charges += 1
 			_sound.play_event("purchase", pos, -7)
+		return
 
 func _draw_shop() -> void:
 	draw_rect(Rect2(Vector2.ZERO, SIZE), Color(0.015, 0.025, 0.045, 0.74))
@@ -938,42 +1098,199 @@ func _draw_shop() -> void:
 	_label(Vector2(112, 132), "상점", 29, Color("f4e1bd"))
 	_label(Vector2(720, 130), "보유  %d 코인" % _progress.wallet, 24, Color("e8c483"))
 	_label(Vector2(1118, 134), "×", 30, Color("d7dfe2"))
-	var mouse: Vector2 = get_global_mouse_position()
-	for i: int in range(Progression.CATALOG.size()):
-		var item: Dictionary = Progression.CATALOG[i]
-		var rect: Rect2 = _shop_rect(i)
-		var level: int = _progress.levels[item.id]
-		var capped: bool = level >= int(item.max)
-		var locked: String = _progress.requirement(item.id)
-		var price: int = _progress.cost(item.id)
-		var affordable: bool = _progress.wallet >= price and not capped and locked.is_empty()
-		_box(rect, Color("182832"), 10)
-		_draw_thumbnail(_assets[item.asset], Rect2(rect.position + Vector2(12, 12), Vector2(55, 62)))
-		_label(rect.position + Vector2(78, 34), item.name, 16, Color("ecdcc0"))
-		_label(rect.position + Vector2(78, 58), "Lv.%d / %d" % [level, item.max], 13, Color("86b5ac"))
-		var lines: PackedStringArray = String(item.detail).split(" · ")
-		for j: int in range(mini(lines.size(), 3)):
-			_label(rect.position + Vector2(15, 92 + j * 19), lines[j], 12, Color("b3c2c6"))
-		if item.id in ["trap", "flytrap", "sundew", "dragonfly"] and level > 0:
-			_label(rect.position + Vector2(15, 143), "현재 간격 %.1f초" % _progress.interval(item.id), 11, Color("86a3b4"))
-		var button: Rect2 = Rect2(rect.position + Vector2(14, 155), Vector2(224, 31))
-		var color: Color = Color("34594e") if affordable else Color("2a3740")
-		if affordable and button.has_point(mouse):
-			color = Color("4b7562")
-		_box(button, color, 6)
-		var text: String = "최고 단계" if capped else ("구매" if level == 0 else "강화") + "  ·  %d 코인" % price
-		if not locked.is_empty():
-			text = locked
-		_label(button.position + Vector2(12, 21), text, 14, Color("f2e3c4") if affordable else Color("879ba3"))
+	for tab_index: int in range(4):
+		var tab_rect: Rect2 = Rect2(110 + tab_index * 130, 145, 122, 27)
+		_box(tab_rect, Color("34594e") if tab_index == _shop_page else Color("1c3038"), 6)
+		_label(tab_rect.position + Vector2(14, 19), SHOP_PAGES[tab_index], 14, Color("e4dbc5"))
+	if _shop_page == 0:
+		_box(Rect2(434, 102, 170, 35), Color("34594e"), 7)
+		_label(Vector2(445, 125), "손뼉 · " + ("장착 중" if _progress.equipped_tool == "hand" else "장착"), 14, Color("e4dbc5"))
+	if _shop_page == 3:
+		_draw_collection()
+	else:
+		var items: Array[Dictionary] = _shop_items()
+		var mouse: Vector2 = get_global_mouse_position()
+		for i: int in range(items.size()):
+			var item: Dictionary = items[i]
+			var rect: Rect2 = _shop_rect(i)
+			var level: int = _progress.levels[item.id]
+			var capped: bool = level >= int(item.max)
+			var locked: String = _progress.requirement(item.id)
+			var price: int = _progress.cost(item.id)
+			var affordable: bool = _progress.wallet >= price and not capped and locked.is_empty()
+			_box(rect, Color("182832"), 10)
+			_draw_thumbnail(_assets[item.asset], Rect2(rect.position + Vector2(12, 12), Vector2(55, 62)))
+			_label(rect.position + Vector2(78, 34), item.name, 16, Color("ecdcc0"))
+			var status: String = "%d개 보유" % level if item.get("consumable", false) else "Lv.%d / %d" % [level, item.max]
+			if item.id in ["swatter", "electric", "aerosol"] and level > 0:
+				var equipped: bool = _progress.equipped_tool == item.id
+				_box(Rect2(rect.position + Vector2(78, 48), Vector2(160, 25)), Color("34594e") if equipped else Color("29454e"), 5)
+				status = "장착 중" if equipped else "장착 · Lv.%d" % level
+			_label(rect.position + Vector2(83, 66), status, 13, Color("a9d3c3"))
+			var lines: PackedStringArray = String(item.detail).split(" · ")
+			for j: int in range(mini(lines.size(), 3)):
+				_label(rect.position + Vector2(15, 92 + j * 19), lines[j], 12, Color("b3c2c6"))
+			var button: Rect2 = Rect2(rect.position + Vector2(14, 155), Vector2(224, 31))
+			var color: Color = Color("4b7562") if affordable and button.has_point(mouse) else (Color("34594e") if affordable else Color("2a3740"))
+			_box(button, color, 6)
+			var text: String = "최고 단계" if capped else ("구매" if level == 0 or item.get("consumable", false) else "강화") + " · %d 코인" % price
+			if not locked.is_empty():
+				text = locked
+			_label(button.position + Vector2(12, 21), text, 14, Color("f2e3c4") if affordable else Color("879ba3"))
+	if _shop_page == 1:
+		_box(Rect2(918, 603, 224, 34), Color("34594e"), 7)
+		_label(Vector2(932, 626), "설치물 위치 옮기기", 15, Color("e4dbc5"))
 	_label(Vector2(112, 628), _shop_message, 14, Color("d7c6a5"))
 
-func _draw_thumbnail(texture: Texture2D, rect: Rect2) -> void:
+func _draw_collection() -> void:
+	for kind: int in range(Content.COLLECTION.size()):
+		var rect: Rect2 = _shop_rect(kind)
+		var count: int = _progress.catches.get(str(kind), 0)
+		_box(rect, Color("182832"), 10)
+		_draw_thumbnail(_bug_texture(kind), Rect2(rect.position + Vector2(12, 12), Vector2(45 if kind == 5 else 55, 52 if kind == 5 else 62)), Color(1, 0.88, 0.55) if kind == 2 else (Color(0.94, 0.79, 0.74) if kind == 4 else Color.WHITE))
+		_label(rect.position + Vector2(78, 34), Content.COLLECTION[kind].name, 16, Color("ecdcc0"))
+		_label(rect.position + Vector2(78, 61), "%d마리 포획" % count if count > 0 else "미발견", 13, Color("86b5ac"))
+		var detail: PackedStringArray = _wrap_text(String(Content.COLLECTION[kind].detail), 222, 12)
+		for j: int in range(detail.size()):
+			_label(rect.position + Vector2(15, 106 + j * 22), detail[j], 12, Color("b3c2c6"))
+
+func _wrap_text(text: String, width: float, font_size: int) -> PackedStringArray:
+	var lines: PackedStringArray = PackedStringArray()
+	var line: String = ""
+	for word: String in text.replace(" · ", " ").split(" "):
+		var proposed: String = line + (" " if not line.is_empty() else "") + word
+		if not line.is_empty() and _font.get_string_size(proposed, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x > width:
+			lines.append(line)
+			line = word
+		else:
+			line = proposed
+	if not line.is_empty():
+		lines.append(line)
+	return lines
+
+func _draw_thumbnail(texture: Texture2D, rect: Rect2, tint: Color = Color.WHITE) -> void:
 	var scale_factor: float = minf(rect.size.x / texture.get_width(), rect.size.y / texture.get_height())
 	var size: Vector2 = texture.get_size() * scale_factor
-	draw_texture_rect(texture, Rect2(rect.position + (rect.size - size) / 2, size), false)
+	draw_texture_rect(texture, Rect2(rect.position + (rect.size - size) / 2, size), false, tint)
 
 func _box(rect: Rect2, color: Color, radius: int) -> void:
 	var style: StyleBoxFlat = StyleBoxFlat.new()
 	style.bg_color = color
 	style.set_corner_radius_all(radius)
 	draw_style_box(style, rect)
+
+func _first_night() -> void:
+	_progress.night = 1
+	_progress.save()
+	_restart()
+	_start_game()
+
+func _update_waves(delta: float) -> void:
+	if Content.pattern(_progress.night) != 0:
+		return
+	if _wave_index < 2 and _elapsed >= 18 + _wave_index * 20:
+		_wave_index += 1
+		if _window_time <= 0:
+			_wave_queue += Content.wave_size(_progress.night, _progress.levels["screen"])
+	_wave_timer -= delta
+	if _window_time > 0:
+		_wave_queue = 0
+	elif _wave_queue > 0 and _wave_timer <= 0 and _bugs.size() < Difficulty.active_limit(_progress.night):
+		_spawn_bug(5, Vector2(randf_range(660, 810), 150))
+		_wave_queue -= 1
+		_wave_timer = 0.55
+
+func _use_window() -> bool:
+	if _intro or _paused or _over or _shop or _placing or _window_time > 0:
+		return false
+	if not _progress.consume("window"):
+		return false
+	_window_time = 12.0
+	_wave_queue = 0
+	_sound.play_event("window", Vector2(760, 250), -13)
+	_dirty = true
+	return true
+
+func _update_spray(delta: float) -> void:
+	if _spray_time <= 0:
+		for bug: Dictionary in _bugs:
+			bug.spray_dose = maxf(0, float(bug.get("spray_dose", 0)) - delta * 2)
+		return
+	_spray_time = maxf(0, _spray_time - delta)
+	var cone: PackedVector2Array = Aerosol.outline(_swat_pos, _progress.levels["aerosol"], Aerosol.DURATION - _spray_time)
+	for i: int in range(_bugs.size() - 1, -1, -1):
+		var bug: Dictionary = _bugs[i]
+		bug.spray_dose = float(bug.get("spray_dose", 0)) + delta if Aerosol.touches(bug, cone) else maxf(0, float(bug.get("spray_dose", 0)) - delta * 2)
+		if float(bug.spray_dose) >= Aerosol.EXPOSURE:
+			_combo += 1
+			_combo_timer = 2.2
+			_capture(i, "hand", _swat_pos)
+
+func _draw_aerosol(aim: Vector2) -> void:
+	var origin: Vector2 = Aerosol.nozzle(aim)
+	if _spray_time > 0:
+		var age: float = Aerosol.DURATION - _spray_time
+		var axis: Vector2 = origin.direction_to(aim)
+		var normal: Vector2 = Vector2(-axis.y, axis.x)
+		for particle: int in range(65):
+			var t: float = fposmod(age * 3.8 + particle * 0.618, 1)
+			var length: float = (235 + _progress.levels["aerosol"] * 25) * t
+			if length > age * 2200:
+				continue
+			var across: float = sin(particle * 17.43) * t * (43 + _progress.levels["aerosol"] * 9)
+			var point: Vector2 = origin + axis * length + normal * across
+			draw_circle(point, 0.7 + t * 2.1, Color(0.8, 0.86, 0.91, (1 - t) * 0.17))
+	var size: Vector2 = _assets["aerosol"].get_size()
+	size *= 200.0 / size.x
+	var recoil: float = sin((Aerosol.DURATION - _spray_time) * 65) * 0.4 if _spray_time > 0 else 0
+	draw_texture_rect(_assets["aerosol"], Rect2(origin - size * Vector2(0.29, 0.104) + Vector2(recoil, recoil), size), false, Color(0.83, 0.88, 0.94))
+	draw_circle(aim, 1.5, Color(0.96, 0.98, 1, 0.65))
+
+func _begin_placement() -> void:
+	_placing = true
+	_shop = false
+	_swat = 0
+	_spray_time = 0
+	_clap_pending = false
+	_swing_tool = ""
+	_sound.silence()
+	_dirty = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+func _placement_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.physical_keycode in [KEY_ESCAPE, KEY_B, KEY_ENTER]:
+		if not _drag_prop.is_empty():
+			_progress.placements[_drag_prop] = _drag_original
+		_drag_prop = ""
+		_placing = false
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		var pos: Vector2 = get_canvas_transform().affine_inverse() * event.position
+		if event.pressed:
+			if Rect2(1030, 650, 160, 40).has_point(pos):
+				_placing = false
+				Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+				return
+			for id: String in Props.WIDTHS:
+				if _progress.levels[id] > 0 and Rect2(_progress.position_for(id) + _prop_rect(id).position, _prop_rect(id).size).has_point(pos):
+					_drag_prop = id
+					_drag_original = _progress.position_for(id)
+					_drag_offset = _drag_original - pos
+					break
+		elif not _drag_prop.is_empty():
+			_progress.place(_drag_prop, pos + _drag_offset)
+			_drag_prop = ""
+	if event is InputEventMouseMotion and not _drag_prop.is_empty():
+		var pos: Vector2 = get_canvas_transform().affine_inverse() * event.position
+		_progress.placements[_drag_prop] = Props.clear_position(_drag_prop, pos + _drag_offset, _progress.placements, _progress.levels)
+
+func _draw_placement() -> void:
+	for surface: Rect2 in Props.SURFACES:
+		draw_line(surface.position, surface.end, Color(0.71, 0.83, 0.73, 0.5), 2, true)
+	for id: String in Props.WIDTHS:
+		if _progress.levels[id] > 0:
+			draw_rect(Rect2(_progress.position_for(id) + _prop_rect(id).position, _prop_rect(id).size), Color(0.75, 0.87, 0.72, 0.65), false, 1)
+	_center("식물·포충기를 가구 위로 끌어 놓기", 651, 16)
+	_box(Rect2(1030, 650, 160, 40), Color("34594e"), 8)
+	_label(Vector2(1050, 677), "완료 · Esc", 16, Color("e4dbc5"))

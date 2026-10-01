@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://b172nnjre8mkv"
-path="res://.godot/imported/dragonfly_body.png-7fc5de670a1e0880ebee3c414eab400b.ctex"
+uid="uid://bqg470pxsvcvl"
+path="res://.godot/imported/repellent.png-5cf4087348cca232723441c95e6950e9.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/dragonfly_body.png"
-dest_files=["res://.godot/imported/dragonfly_body.png-7fc5de670a1e0880ebee3c414eab400b.ctex"]
+source_file="res://assets/repellent.png"
+dest_files=["res://.godot/imported/repellent.png-5cf4087348cca232723441c95e6950e9.ctex"]
 
 [params]
 
@@ -36,5 +36,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=384
+process/size_limit=256
 detect_3d/compress_to=1

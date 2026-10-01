@@ -7,7 +7,7 @@ from fontTools.varLib.instancer import instantiateVariableFont
 project = Path(__file__).resolve().parents[1]
 source = project / "tools/fonts/NotoSansKR.ttf"
 destination = project / "assets/fonts/NightKorean.ttf"
-text = "".join((project / name).read_text() for name in ("main.gd", "progression.gd"))
+text = "".join(path.read_text() for path in sorted(project.glob("*.gd")) if not path.name.startswith("verify"))
 characters = set(range(32, 127)) | {ord(character) for character in text}
 font = TTFont(source)
 instantiateVariableFont(font, {"wght": 400}, inplace=True)

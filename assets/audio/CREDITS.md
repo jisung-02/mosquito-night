@@ -15,3 +15,7 @@ Air swishes, gentle leaf friction, sticky leaf contact, small water sounds, drag
 `tools/build_audio.py` reproduces the 36 short effects/loops using Python's standard library and ffmpeg. The edit process trims silence, normalizes peaks below clipping, varies pitch and adds a restrained room reflection to selected contacts. `game_audio.gd` uses a pool of separate positional voices so simultaneous captures do not cut each other off. Ambient fan/insect loops become silent during pause, the shop, game over or mute. M stops active effects immediately. The purchase click can still play in the shop when sound is enabled.
 
 신문지 효과음: paper_swing_1–3.wav는 원본 종이 마찰·공기 폴리 합성, paper_hit_1–3.wav는 저역 필터를 거친 위 CC0 손뼉 녹음에 원본 종이 마찰·둔탁한 충격 합성을 섞었습니다. tools/build_audio.py --paper-only로 재생성할 수 있습니다.
+
+- Aerosol Spray — WeeJee_vdH, CC0: https://freesound.org/people/WeeJee_vdH/sounds/267709/. Real studio aerosol hiss trimmed to three 0.65-second bursts, mono, fades and subtle room reflections. Source preview in source/spray.mp3.
+- Window slide/latch: original paper friction and mechanical click foley.
+- Electric racket: two 23ms excerpts of the existing CC0 high-voltage spark recording, 40–50ms apart with fast decay; a short “따닥” rather than a continuous buzz.

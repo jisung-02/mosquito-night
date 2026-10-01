@@ -102,7 +102,7 @@ func _verify() -> void:
 			game._spawn_bug()
 			if int(game._bugs[0].kind) >= 3:
 				rare += 1
-		_check(rare == 0 if night == 1 else rare > 20 and rare < 100, "irregular variants are introduced gradually and stay a minority")
+		_check(rare == 0 if night == 1 else rare > 50 and rare < 150, "irregular variants are introduced gradually and stay a minority")
 	for id: String in game._progress.levels:
 		game._progress.levels[id] = 1
 	game._progress.night = 6

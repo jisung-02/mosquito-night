@@ -1,7 +1,7 @@
 class_name NightAudio
 extends Node2D
 ## Separate positional voices let impacts and autonomous devices overlap.
-const EVENTS: Array[String] = ["hand_hit", "hand_miss", "swing", "paper_swing", "paper_hit", "zap", "trap", "flytrap", "sundew", "dragonfly", "purchase"]
+const EVENTS: Array[String] = ["hand_hit", "hand_miss", "swing", "paper_swing", "paper_hit", "zap", "trap", "flytrap", "sundew", "dragonfly", "purchase", "spray", "window"]
 const VOICE_COUNT: int = 16
 var muted: bool = false
 var last_event: String = ""
@@ -57,7 +57,7 @@ func silence() -> void:
 	for player: AudioStreamPlayer2D in _loops.values():
 		player.volume_db = -80
 
-func update_room(delta: float, bugs: Array[Dictionary], active: bool, levels: Dictionary[String, int], dragon_pos: Vector2) -> void:
+func update_room(delta: float, bugs: Array[Dictionary], active: bool, levels: Dictionary[String, int], dragon_pos: Vector2, trap_pos: Vector2 = Vector2(1106, 333)) -> void:
 	if muted:
 		silence()
 		return
@@ -72,7 +72,7 @@ func update_room(delta: float, bugs: Array[Dictionary], active: bool, levels: Di
 	var distance: float = INF
 	for bug: Dictionary in bugs:
 		var current: float = bug.pos.distance_to(Vector2(640, 580))
-		if current < distance:
+		if current < distance and float(bug.wing_energy) > 0.12:
 			distance = current
 			nearest = bug
 	var mosquito: AudioStreamPlayer2D = _loops["mosquito"]
@@ -82,7 +82,7 @@ func update_room(delta: float, bugs: Array[Dictionary], active: bool, levels: Di
 		mosquito.pitch_scale = lerpf(mosquito.pitch_scale, 0.94 + float(nearest.wing_energy) * 0.12, 1 - exp(-delta * 3))
 		target_volume = -30.0 + float(nearest.depth) * 8 - minf(8, distance / 90)
 	mosquito.volume_db = lerpf(mosquito.volume_db, target_volume, 1 - exp(-delta * 8))
-	_loops["fan"].position = Vector2(1146, 248) if levels["fan"] > 0 else Vector2(1106, 288)
+	_loops["fan"].position = Vector2(1146, 248) if levels["fan"] > 0 else trap_pos + Vector2(0, -45)
 	_loops["fan"].volume_db = -30 + levels["fan"] * 1.5 if levels["fan"] > 0 else (-34 if levels["trap"] > 0 else -80)
 	_loops["dragonfly"].position = dragon_pos
 	_loops["dragonfly"].volume_db = -34 if levels["dragonfly"] > 0 else -80

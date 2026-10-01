@@ -18,10 +18,10 @@ static func create(id: int, kind: int, pos: Vector2, seed_value: int) -> Diction
 		"life": 10.0 if kind == 0 else 7.0,
 		"speed_scale": 1.0,
 		"hp": 2 if kind == 4 else 1, "hurt_timer": 0.0,
-		"mode": "cruise", "mode_timer": rng.randf_range(0.7, 2.0),
+		"rest_target": Vector2.INF, "mode": "cruise", "mode_timer": rng.randf_range(0.7, 2.0),
 		"turn": 0.0, "turn_target": 0.0, "noise_timer": 0.0,
 		"depth": depth, "depth_target": depth, "depth_timer": rng.randf_range(2, 4),
-		"wing_energy": 0.8, "body_size": lerpf(42, 70, depth) * (1.15 if kind == 4 else 1.0)}
+		"wing_energy": 0.8, "body_size": lerpf(42, 70, depth) * (1.15 if kind == 4 else (0.82 if kind == 5 else 1.0))}
 
 static func advance(bug: Dictionary, delta: float, attractor: Vector2 = Vector2.INF, threat: Vector2 = Vector2.INF) -> void:
 	var left: float = maxf(0, delta)
@@ -33,12 +33,18 @@ static func advance(bug: Dictionary, delta: float, attractor: Vector2 = Vector2.
 static func _step(bug: Dictionary, delta: float, attractor: Vector2, threat: Vector2) -> void:
 	var rng: RandomNumberGenerator = bug.rng
 	bug.hurt_timer = maxf(0, float(bug.get("hurt_timer", 0.0)) - delta)
-	bug.phase += delta
+	bug.phase += delta * (0.08 if bug.mode == "rest" else 1.0)
 	bug.mode_timer -= delta
 	if float(bug.mode_timer) <= 0:
 		var choice: float = rng.randf()
 		bug.mode = "hover" if choice < 0.24 else ("dart" if choice > (0.83 if int(bug.kind) == 3 else 0.88) else "cruise")
 		bug.mode_timer = rng.randf_range(0.8, 1.5) if bug.mode == "hover" else rng.randf_range(1.4, 3.2)
+		if int(bug.kind) == 6 and choice < 0.55:
+			bug.mode = "land"
+			var left_wall: Vector2 = Vector2(clampf(Vector2(bug.pos).x, 270, 355), clampf(Vector2(bug.pos).y, 150, 305))
+			var right_wall: Vector2 = Vector2(clampf(Vector2(bug.pos).x, 1040, 1100), clampf(Vector2(bug.pos).y, 140, 185))
+			bug.rest_target = left_wall if Vector2(bug.pos).distance_to(left_wall) < Vector2(bug.pos).distance_to(right_wall) else right_wall
+			bug.mode_timer = 5.0
 		if bug.mode == "dart":
 			bug.mode_timer = rng.randf_range(0.35, 0.65)
 	bug.noise_timer -= delta
@@ -68,7 +74,17 @@ static func _step(bug: Dictionary, delta: float, attractor: Vector2, threat: Vec
 		if pos.distance_to(attractor) < 85:
 			# Slow down onto a landing surface instead of circling through it.
 			desired = pos.direction_to(attractor) * minf(42, pos.distance_to(attractor) * 2.2)
+	if bug.mode == "land":
+		desired = pos.direction_to(bug.rest_target) * minf(60, pos.distance_to(bug.rest_target) * 2.5)
+		if pos.distance_to(bug.rest_target) < 4 and Vector2(bug.velocity).length() < 10:
+			bug.mode = "rest"
+			bug.mode_timer = rng.randf_range(1.8, 3.2)
+	if bug.mode == "rest":
+		desired = Vector2.ZERO
 	if threat.is_finite() and pos.distance_to(threat) < 100:
+		if bug.mode in ["land", "rest"]:
+			bug.mode = "dart"
+			bug.mode_timer = 0.5
 		desired += threat.direction_to(pos) * 100
 	var speed_scale: float = clampf(float(bug.get("speed_scale", 1.0)), 0.45, 1.6)
 	desired *= speed_scale
@@ -89,5 +105,5 @@ static func _step(bug: Dictionary, delta: float, attractor: Vector2, threat: Vec
 		bug.depth_target = clampf(float(bug.depth) + rng.randf_range(-0.28, 0.28), 0.0, 1.0)
 		bug.depth_timer = rng.randf_range(3, 5)
 	bug.depth = lerpf(float(bug.depth), float(bug.depth_target), 1 - exp(-delta * 0.55))
-	bug.body_size = lerpf(42, 70, float(bug.depth)) * (1.15 if int(bug.kind) == 4 else 1.0)
-	bug.wing_energy = lerpf(float(bug.wing_energy), 0.72 if bug.mode == "hover" else 1.0, 1 - exp(-delta * 4))
+	bug.body_size = lerpf(42, 70, float(bug.depth)) * (1.15 if int(bug.kind) == 4 else (0.82 if int(bug.kind) == 5 else 1.0))
+	bug.wing_energy = lerpf(float(bug.wing_energy), 0.0 if bug.mode == "rest" else (0.72 if bug.mode == "hover" else 1.0), 1 - exp(-delta * 4))

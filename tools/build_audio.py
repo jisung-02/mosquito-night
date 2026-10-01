@@ -113,7 +113,46 @@ def build_paper(clap):
         write(f"paper_hit_{variant}", impact, 0.48, room=True)
 
 
+def build_discharge(sparks):
+    """Two short recorded cracks, without a sustained buzzing tail."""
+    peaks = []
+    for index in sorted(range(0, len(sparks), 100), key=lambda i: abs(sparks[i]), reverse=True):
+        if all(abs(index - p) > RATE * 0.12 for p in peaks):
+            peaks.append(index)
+        if len(peaks) == 6:
+            break
+    for variant in range(1, 4):
+        clip = [0.0] * int(0.14 * RATE)
+        for j, offset in enumerate([0.008, 0.044 + variant * 0.004]):
+            peak = peaks[(variant - 1) * 2 + j]
+            start = max(0, peak - int(0.0015 * RATE))
+            burst = sparks[start:start + int(0.023 * RATE)]
+            for k, value in enumerate(burst):
+                clip[int(offset * RATE) + k] += value * math.exp(-k / RATE * 100) * (1 if j == 0 else 0.78)
+        write(f"zap_{variant}", clip, 0.72, room=True)
+
+
+def build_consumable_sounds():
+    spray = recording("spray")
+    for variant in range(1, 4):
+        clip = spray[int((0.45 + variant * 0.025) * RATE):int((1.10 + variant * 0.025) * RATE)]
+        fade = int(0.015 * RATE)
+        for i in range(fade):
+            clip[i] *= i / fade
+            clip[-1 - i] *= i / fade
+        write(f"spray_{variant}", clip, 0.45, room=True)
+        slide = noise_foley(0.34, 190 + variant, "paper")
+        latch = noise_foley(0.08, 200 + variant, "switch")
+        for i, value in enumerate(latch):
+            slide[len(slide) - len(latch) + i] += value * 0.35
+        write(f"window_{variant}", slide, 0.23, room=True)
+
+
 def main():
+    if "--new-content-only" in sys.argv:
+        build_discharge(recording("sparks"))
+        build_consumable_sounds()
+        return
     clap = recording("clap")
     peak = max(range(len(clap)), key=lambda i: abs(clap[i]))
     clap = clap[max(0, peak - int(RATE * 0.012)):peak + int(RATE * 0.25)]
@@ -141,7 +180,7 @@ def main():
         write(f"swatter_hit_{variant}", slap, 0.52, room=True)
         index = spark_peaks[variant - 1]
         zap = sparks[max(0, index - int(RATE * 0.004)):index + int(RATE * 0.16)]
-        write(f"zap_{variant}", zap, 0.72, room=True)
+        # Rebuilt below as a short paired discharge rather than a long buzz.
         write(f"flytrap_{variant}", noise_foley(0.29, 20 + variant, "leaf"), 0.23, room=True)
         write(f"sundew_{variant}", noise_foley(0.34, 30 + variant, "sticky"), 0.18)
         write(f"nursery_{variant}", noise_foley(0.19, 40 + variant, "water"), 0.16)
@@ -159,6 +198,8 @@ def main():
         for i in range(len(intake)):
             intake[i] *= math.sin(math.pi * i / len(intake)) ** 1.2
         write(f"trap_{variant}", resample(intake, 0.94 + variant * 0.03), 0.46, room=True)
+    build_discharge(sparks)
+    build_consumable_sounds()
     files = list(ROOT.glob("*.wav"))
     print(f"Built {len(files)} mono 44.1 kHz effects and seamless room loops")
 

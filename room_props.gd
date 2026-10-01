@@ -30,3 +30,35 @@ static func wind_strength(pos: Vector2, level: int) -> float:
 	var width: float = 75.0 + distance * 0.25
 	var strength: float = (0.16 + clampi(level, 1, 3) * 0.08) * (1.0 - smoothstep(320, 550, distance))
 	return strength * (1.0 - smoothstep(width * 0.45, width, across))
+
+# Feet stay on the measured bedside, windowsill or desk surface.
+const SURFACES: Array[Rect2] = [Rect2(126, 392, 132, 0), Rect2(604, 363, 258, 0), Rect2(1044, 333, 162, 0)]
+
+static func snap(requested: Vector2) -> Vector2:
+	var nearest: Vector2 = POSITIONS.trap
+	var distance: float = INF
+	for surface: Rect2 in SURFACES:
+		var candidate: Vector2 = Vector2(clampf(requested.x, surface.position.x, surface.end.x), surface.position.y)
+		if requested.distance_squared_to(candidate) < distance:
+			nearest = candidate
+			distance = requested.distance_squared_to(candidate)
+	return nearest
+
+static func clear_position(id: String, requested: Vector2, placements: Dictionary, levels: Dictionary) -> Vector2:
+	var best: Vector2 = snap(requested)
+	var distance: float = INF
+	# Search physical supports, rejecting overlaps with other installed objects.
+	for surface: Rect2 in SURFACES:
+		for x: int in range(int(surface.position.x), int(surface.end.x) + 1, 2):
+			var candidate: Vector2 = Vector2(x, surface.position.y)
+			var clear: bool = true
+			for other: String in WIDTHS:
+				if other == id or levels.get(other, 0) <= 0:
+					continue
+				var occupied: Vector2 = placements.get(other, POSITIONS[other])
+				if absf(candidate.y - occupied.y) < 2 and absf(candidate.x - occupied.x) < (float(WIDTHS[id]) + float(WIDTHS[other])) * 0.5 + 8:
+					clear = false
+			if clear and requested.distance_squared_to(candidate) < distance:
+				best = candidate
+				distance = requested.distance_squared_to(candidate)
+	return best

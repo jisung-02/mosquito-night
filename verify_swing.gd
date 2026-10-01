@@ -117,6 +117,9 @@ func _verify() -> void:
 		game._process(game._swing_duration * 0.18)
 		await _snapshot(game, "swing-" + tool + "-follow")
 	game._sound.silence()
+	for player: AudioStreamPlayer2D in game._sound._loops.values():
+		player.stop()
+	await create_timer(0.15).timeout
 	game.queue_free()
 	await process_frame
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://verification_progression.json"))
