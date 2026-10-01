@@ -1,0 +1,37 @@
+[
+  {
+    "name": "clap",
+    "url": "https://freesound.org/people/OwlStorm/sounds/151219/",
+    "preview": "https://cdn.freesound.org/previews/151/151219_140737-hq.mp3",
+    "licence": "CC0",
+    "bytes": 79842
+  },
+  {
+    "name": "sparks",
+    "url": "https://freesound.org/people/kev_durr/sounds/396470/",
+    "preview": "https://cdn.freesound.org/previews/396/396470_5415774-hq.mp3",
+    "licence": "CC0",
+    "bytes": 355968
+  },
+  {
+    "name": "mosquito",
+    "url": "https://freesound.org/people/IanFSA/sounds/662970/",
+    "preview": "https://cdn.freesound.org/previews/662/662970_4287394-hq.mp3",
+    "licence": "CC0",
+    "bytes": 346846
+  },
+  {
+    "name": "electric",
+    "url": "https://freesound.org/people/soundtracvkradio/sounds/394679/",
+    "preview": "https://cdn.freesound.org/previews/394/394679_1015909-hq.mp3",
+    "licence": "CC0",
+    "bytes": 752027
+  },
+  {
+    "name": "fan",
+    "url": "https://freesound.org/people/Thskk/sounds/396963/",
+    "preview": "https://cdn.freesound.org/previews/396/396963_7434826-hq.mp3",
+    "licence": "CC0",
+    "bytes": 2462496
+  }
+]

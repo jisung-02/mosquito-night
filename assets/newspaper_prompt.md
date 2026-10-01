@@ -1,0 +1,7 @@
+# 말아 쥔 신문지
+
+내장 imagegen으로 생성한 [newspaper.png](/Users/chaejisung/.codex/.chatgpt-projects/g-p-6abc55e009fc8191b9ac3f95b0b21e70/mosquito-night/assets/newspaper.png). 기존 첫 도구를 대체합니다. 노출된 종이 부분만 긴 타원으로 판정하고, 잡고 있는 손과 팔은 제외합니다. 기존 구매 기록을 유지하기 위해 저장 키 swatter를 재사용합니다.
+
+## 생성 프롬프트
+
+Use case: photorealistic-natural. Asset type: transparent game tool sprite, portrait. Exactly one adult human RIGHT hand firmly gripping the LOWER third of a rolled-up newspaper, prepared to swat a mosquito. Newspaper is a thick slightly flattened paper tube held almost vertically pointing UP, warm off-white matte newsprint, small indistinct black print columns and a small generic grayscale picture, visible curled paper layers at the top, worn folds, no legible text or logos. Compose the ungripped newspaper in the upper 60 percent: top near normalized y=.055, newspaper axis x=.50, ungripped paper striking section centered (x=.50,y=.30), left/right edges around x=.34/.66, lower paper near y=.66. Hand grips around y=.69 to .84, short forearm exits bottom near y=.98. Show thumb naturally wrapping the rolled paper with anatomically correct fingers. Complete paper top and hand visible with margin. Restrained photorealism, realistic skin and paper fibers, soft cool moonlit bedroom lighting with a faint warm left rim, subtle shadows only on the object. True transparent alpha background, clean edges, no ambient halo, no environment, no electric mesh, no racket, no sparks, no insect, no watermark.

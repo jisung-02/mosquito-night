@@ -1,0 +1,15 @@
+.godot/
+.DS_Store
+__pycache__/
+*.log
+/tools/.font-venv/
+/*.png
+/*.png.import
+/*.jpg
+/*.jpg.import
+/*.avi
+/*.mp4
+/assets/nursery*
+/assets/audio/nursery*
+/assets/swatter.png*
+

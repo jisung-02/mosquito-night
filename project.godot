@@ -1,0 +1,13 @@
+config_version=5
+[application]
+config/name="잠 못 드는 밤 · Mosquito Night"
+run/main_scene="res://main.tscn"
+[display]
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/mode=3
+window/stretch/mode="canvas_items"
+window/stretch/aspect="ignore"
+[rendering]
+renderer/rendering_method="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.06,0.09,0.15,1)
