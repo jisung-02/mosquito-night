@@ -12,7 +12,9 @@ GitHub Pages 배포 주소: https://jisung-02.github.io/mosquito-night/
 
 게임 소스 저장소는 [jisung-02/mosquito-night](https://github.com/jisung-02/mosquito-night)입니다. [페이지 저장소](https://github.com/jisung-02/jisung-02.github.io)는 `games/mosquito-night` Git submodule로 게임의 특정 커밋을 지정합니다. Pages 배포는 submodule을 함께 가져와 Godot 4.7.2로 게임을 빌드한 뒤 Astro 사이트에 포함합니다. 생성된 WebAssembly·PCK 파일은 페이지 저장소에서 추적하지 않습니다.
 
-Web 내보내기는 단일 스레드로 설정해 GitHub Pages에 추가 응답 헤더 없이 실행됩니다. `python3 tools/export_web.py --output ../web-build/mosquito-night`로 웹 파일과 라이선스를 생성합니다. Godot이 PATH에 없으면 `--godot /Applications/Godot.app/Contents/MacOS/Godot`을 추가하세요. `build.json`에 실제 게임 커밋·엔진 버전·PCK 체크섬이 기록됩니다.
+Web 내보내기는 단일 스레드로 설정해 GitHub Pages에 추가 응답 헤더 없이 실행됩니다. `python3 tools/export_web.py --output ../web-build/mosquito-night`로 웹 파일과 라이선스를 생성합니다. Godot이 PATH에 없으면 `--godot /Applications/Godot.app/Contents/MacOS/Godot`을 추가하세요. Godot 4.7.2를 사용해야 하며, 첫 내보내기는 공식 소스에서 게임 전용 엔진을 빌드하므로 개발 도구 다운로드와 컴파일에 시간이 필요합니다. 이후에는 검증한 엔진 캐시를 재사용합니다. `build.json`에 실제 게임 커밋·엔진 버전·빌드 설정·PCK/WASM 체크섬, `size-report.json`에 파일별 크기가 기록됩니다.
+
+[웹 빌드와 소스 다운로드](https://github.com/jisung-02/mosquito-night/releases)에서 `mosquito-night-web.zip`과 해당 버전의 Source code ZIP을 받을 수 있습니다. 웹 빌드는 압축을 풀고 폴더 전체를 HTTPS 정적 서버에 올리면 됩니다. 로컬 확인은 해당 폴더에서 `python3 -m http.server 8766`을 실행하고 `http://localhost:8766`을 엽니다. 코드 저장소에는 생성된 엔진·게임 바이너리를 넣지 않고 Release에 별도로 배포합니다.
 
 페이지 저장소를 처음 받을 때는 `git clone --recurse-submodules git@github.com:jisung-02/jisung-02.github.io.git`을 사용하세요. 이미 받은 저장소에서는 `git submodule update --init --recursive`로 지정 버전을 복원합니다. 게임을 수정하면 게임 저장소에 먼저 커밋·push한 뒤, 페이지 저장소의 submodule 커밋을 갱신하고 배포합니다. `git submodule update --remote games/mosquito-night`는 게임의 최신 main을 가져오며, 부모 저장소에 변경된 포인터를 커밋해야 배포 버전이 바뀝니다.
 
@@ -171,7 +173,11 @@ H는 확인용 윤곽선을 켜며 별도의 화면이나 패널을 열지 않�
 
 모기 날개 잔상은 한 번 만든 메시를 재사용합니다. 움직이는 몸·잎·손은 크기에 맞는 격자를 사용하고 GPU의 삼각형·UV 데이터를 다시 만들지 않고 바뀐 정점만 업데이트합니다. 멈춘 시작 화면·상점·배치 모드에서는 입력이 바뀌었을 때만 다시 그립니다. 비행·타격의 120Hz 계산과 소리 품질은 유지합니다.
 
-웹 게임 소재 패키지는 13,250,676 → 3,000,548바이트(약 77% 감소)입니다. Godot 실행 엔진 WASM은 39,514,754바이트로 그대로이며, 전체 최초 다운로드는 이 엔진을 포함합니다.
+웹 게임 소재 패키지는 13,250,676 → 3,000,548바이트(약 77% 감소)입니다. 이어서 Godot 실행 엔진을 이 게임에 필요한 기능만 포함하도록 빌드해 WASM을 39,514,754 → 21,938,298바이트(약 44% 감소)로 줄였습니다. 주요 웹 실행 파일 합계는 약 42.83MB → 25.22MB(약 41% 감소), 같은 파일의 로컬 gzip-9 압축 추정 합계는 13.10MB → 8.57MB(약 35% 감소)입니다. 서버가 실제 전송하는 압축 크기와 로딩 시간은 호스트·네트워크·브라우저 캐시에 따라 다릅니다.
+
+전용 빌드는 [Godot 공식 용량 최적화 가이드](https://docs.godotengine.org/en/stable/engine_details/development/compiling/optimizing_for_size.html)에 따라 3D·2D 물리·고급 GUI·사용하지 않는 엔진 모듈을 제외하고 GDScript·FreeType·고급 한글 텍스트 처리·WebP를 유지합니다. 속도 저하를 피하려고 기본 Web 최적화인 `size`와 전체 링크 최적화(LTO)를 사용하며 `size_extra`는 쓰지 않습니다. `tools/web_template.py`가 빌드 설정이고, `tools/build_web_template.py`가 Godot 소스 커밋·Emscripten 4.0.11·SCons 4.9.1 및 소스 압축파일 체크섬을 고정합니다. 빌드 도구의 환경은 컴파일 프로세스에만 적용하며 사용자 셸 설정은 바꾸지 않습니다.
+
+`python3 tools/package_web.py --input web-build --output dist/mosquito-night-web.zip`은 PCK·WASM 체크섬과 라이선스 파일을 검사한 뒤 ZIP으로 묶습니다. `web-*` 태그를 올리면 GitHub Actions가 해당 소스를 새로 빌드하고 ZIP을 Release에 업로드합니다. Pages도 동일 설정으로 빌드하며 완성된 엔진 ZIP만 캐시합니다. Web 파일은 `tools/.web-template`·`web-build`·`dist`에서 만들고 게임 패키지나 Git 소스에 중복으로 넣지 않습니다.
 
 Apple M2 / Godot 4.7.2 / 동일한 12마리·모든 설치물·두 손 장면에서 240회 CPU 그림 명령 작성 측정: 평균 8.70ms → 2.14ms(약 75% 감소), 95백분위 8.94ms → 2.38ms. 이 값은 전체 FPS나 GPU 프레임 시간이 아닙니다. 같은 측정의 렌더러 텍스처 메모리(화면 버퍼 포함)는 162.6MB → 84.1MB입니다. 아래 검증은 실제 표시 크기에서 메시 보간 오차가 최대 0.765px이고 GPU 메시·삼각형을 재사용함을 확인합니다.
 

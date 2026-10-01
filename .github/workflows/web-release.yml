@@ -1,0 +1,41 @@
+name: Publish Web build
+
+on:
+  push:
+    tags: ['web-*']
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Godot
+        uses: chickensoft-games/setup-godot@92cdaf8c4a2654f205d3ed422bb0bab431c6d59e
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: true
+      - name: Cache the minimal Web template
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/mosquito-night-web-build/mosquito-web-release.zip
+            ~/.cache/mosquito-night-web-build/template.json
+          key: mosquito-web-${{ runner.os }}-${{ hashFiles('tools/build_web_template.py', 'tools/web_template.py') }}
+      - name: Build and verify the Web package
+        run: |
+          python3 tools/export_web.py --output web-build
+          python3 tools/package_web.py --input web-build --output dist/mosquito-night-web.zip
+      - name: Publish downloadable build and source
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/mosquito-night-web.zip \
+            --verify-tag --title "잠들 수 없는 밤 · $RELEASE_TAG" \
+            --notes-file tools/web_release_notes.md

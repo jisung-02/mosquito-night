@@ -3,6 +3,7 @@
 __pycache__/
 *.log
 /tools/.font-venv/
+/tools/.web-template/
 /*.png
 /*.png.import
 /*.jpg
@@ -12,4 +13,5 @@ __pycache__/
 /assets/nursery*
 /assets/audio/nursery*
 /assets/swatter.png*
-
+/web-build/
+/dist/
